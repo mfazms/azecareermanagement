@@ -52,6 +52,7 @@ export default function ApplicationModal({
   const [location, setLocation] = useState("");
   const [status, setStatus] = useState<ApplicationStatus>("Saved");
   const [dateApplied, setDateApplied] = useState("");
+  const [deadline, setDeadline] = useState("");
   const [jobLink, setJobLink] = useState("");
   const [cvVersion, setCvVersion] = useState("");
   const [priority, setPriority] = useState("");
@@ -71,6 +72,7 @@ export default function ApplicationModal({
       setLocation(application.location || "");
       setStatus(application.status);
       setDateApplied(application.dateApplied);
+      setDeadline(application.deadline || "");
       setJobLink(application.jobLink || "");
       setCvVersion(application.cvVersion || "");
       setPriority(application.priority || "");
@@ -91,6 +93,7 @@ export default function ApplicationModal({
       setLocation("");
       setStatus("Saved");
       setDateApplied(new Date().toISOString().split("T")[0]);
+      setDeadline("");
       setJobLink("");
       setCvVersion("");
       setPriority("");
@@ -134,6 +137,7 @@ export default function ApplicationModal({
         location: location || "",
         status,
         dateApplied,
+        deadline: status === "Saved" ? deadline : "",
         jobLink: jobLink || "",
         cvVersion: cvVersion || "",
         priority: priority || "",
@@ -165,7 +169,7 @@ export default function ApplicationModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[560px] rounded-2xl p-0 gap-0 border-0 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[560px] rounded-2xl p-0 gap-0 border-0 shadow-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader className="p-6 pb-4">
           <DialogTitle className="text-lg font-semibold text-[#1D1D1F]">
             {isEditing ? `Edit — ${application.company}` : "New Application"}
@@ -197,6 +201,7 @@ export default function ApplicationModal({
                 location={location} setLocation={setLocation}
                 status={status} setStatus={setStatus}
                 dateApplied={dateApplied} setDateApplied={setDateApplied}
+                deadline={deadline} setDeadline={setDeadline}
                 jobLink={jobLink} setJobLink={setJobLink}
                 cvVersion={cvVersion} setCvVersion={setCvVersion}
                 priority={priority} setPriority={setPriority}
@@ -227,6 +232,7 @@ export default function ApplicationModal({
               location={location} setLocation={setLocation}
               status={status} setStatus={setStatus}
               dateApplied={dateApplied} setDateApplied={setDateApplied}
+              deadline={deadline} setDeadline={setDeadline}
               jobLink={jobLink} setJobLink={setJobLink}
               cvVersion={cvVersion} setCvVersion={setCvVersion}
               priority={priority} setPriority={setPriority}
@@ -253,6 +259,7 @@ interface FormFieldsProps {
   location: string; setLocation: (v: string) => void;
   status: ApplicationStatus; setStatus: (v: ApplicationStatus) => void;
   dateApplied: string; setDateApplied: (v: string) => void;
+  deadline: string; setDeadline: (v: string) => void;
   jobLink: string; setJobLink: (v: string) => void;
   cvVersion: string; setCvVersion: (v: string) => void;
   priority: string; setPriority: (v: string) => void;
@@ -271,6 +278,7 @@ interface FormFieldsProps {
 function FormFields({
   company, setCompany, position, setPosition, location, setLocation,
   status, setStatus, dateApplied, setDateApplied,
+  deadline, setDeadline,
   jobLink, setJobLink, cvVersion, setCvVersion,
   priority, setPriority, jobType, setJobType, workArrangement, setWorkArrangement, notes, setNotes,
   isSaving, onSave, cvFile, existingCvUrl, existingCvName,
@@ -343,7 +351,9 @@ function FormFields({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label className="text-sm font-medium text-[#1D1D1F]">Date Applied *</Label>
+          <Label className="text-sm font-medium text-[#1D1D1F]">
+            {status === "Saved" ? "Date Saved *" : "Date Applied *"}
+          </Label>
           <Input
             type="date"
             value={dateApplied}
@@ -353,6 +363,19 @@ function FormFields({
           />
         </div>
       </div>
+
+      {status === "Saved" && (
+        <div className="space-y-2">
+          <Label className="text-sm font-medium text-[#1D1D1F]">Deadline / Last Apply Date *</Label>
+          <Input
+            type="date"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            className="rounded-xl border-[#E8E8ED] focus:border-[#0071E3] focus:ring-blue-500/20"
+            required
+          />
+        </div>
+      )}
 
       <Separator className="my-2" />
 
@@ -392,7 +415,7 @@ function FormFields({
           <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
             <FileText className="w-5 h-5 text-[#0071E3] shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-[#1D1D1F] truncate">{cvFile.name}</p>
+              <p className="text-sm font-medium text-[#1D1D1F] break-words">{cvFile.name}</p>
               <p className="text-xs text-[#86868B]">
                 {(cvFile.size / 1024).toFixed(0)} KB — Ready to upload
                 {isFileOverOneMB && (
@@ -412,7 +435,7 @@ function FormFields({
           <div className="flex items-center gap-3 p-3 bg-[#F5F5F7] rounded-xl border border-[#E8E8ED]">
             <FileText className="w-5 h-5 text-[#0071E3] shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-[#1D1D1F] truncate">{existingCvName}</p>
+              <p className="text-sm font-medium text-[#1D1D1F] break-words">{existingCvName}</p>
               <p className="text-xs text-[#86868B]">Uploaded</p>
             </div>
             <button
@@ -483,7 +506,7 @@ function FormFields({
 
       <Button
         onClick={onSave}
-        disabled={!company || !position || !dateApplied || isSaving}
+        disabled={!company || !position || !dateApplied || (status === "Saved" && !deadline) || isSaving}
         className="w-full h-11 rounded-xl bg-[#0071E3] hover:bg-[#0077ED] text-white font-medium shadow-lg shadow-blue-500/15 transition-all cursor-pointer"
       >
         {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}

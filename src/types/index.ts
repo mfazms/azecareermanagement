@@ -91,6 +91,7 @@ export interface Application {
   location?: string;
   status: ApplicationStatus;
   dateApplied: string;
+  deadline?: string;
   dateUpdated: string;
   jobLink?: string;
   cvVersion?: string;
@@ -161,6 +162,7 @@ export interface UserProfile {
   dateOfBirth?: string;
   mbti?: string;
   dreamPosition?: string;
+  motivationImageUrl?: string;
 }
 
 export interface StorageUsage {

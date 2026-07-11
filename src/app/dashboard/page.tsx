@@ -13,13 +13,14 @@ import ResumeBuilderCard from "@/components/dashboard/ResumeBuilderCard";
 import TopApplicationsChart from "@/components/dashboard/TopApplicationsChart";
 import RecentActivity from "@/components/dashboard/RecentActivity";
 import HiringRoadmap from "@/components/dashboard/HiringRoadmap";
+import MotivationBoard from "@/components/dashboard/MotivationBoard";
 import { getApplications } from "@/lib/firestore";
 import type { Application, KPIData, FunnelData, RejectionReasonData } from "@/types";
 import { FUNNEL_STAGES } from "@/types";
-import { Loader2, GraduationCap, Briefcase } from "lucide-react";
+import { Loader2, GraduationCap, Briefcase, Bookmark, AlertCircle } from "lucide-react";
 
 export default function DashboardPage() {
-  const { user, userProfile, loading: authLoading } = useAuth();
+  const { user, userProfile, loading: authLoading, refreshProfile } = useAuth();
   const router = useRouter();
   const [applications, setApplications] = useState<Application[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,6 +72,79 @@ export default function DashboardPage() {
     return { days: Math.max(diff, 0), company: userProfile.lastPosition.company, position: userProfile.lastPosition.position };
   })();
 
+  // Compute saved apps metrics
+  const { urgentSavedCount, totalSavedCount, minDiffDays } = (() => {
+    let urgent = 0;
+    let total = 0;
+    let minDays: number | null = null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    applications.forEach(app => {
+      if (app.status === "Saved") {
+        total++;
+        if (app.deadline) {
+          const deadlineDate = new Date(app.deadline);
+          const diffTime = deadlineDate.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays <= 7) {
+            urgent++;
+          }
+          if (minDays === null || diffDays < minDays) {
+            minDays = diffDays;
+          }
+        }
+      }
+    });
+    return { urgentSavedCount: urgent, totalSavedCount: total, minDiffDays: minDays };
+  })();
+
+  const getGraduationBoxStyle = (days: number) => {
+    const ratio = Math.min(days / 365, 1);
+    const boxL = 98 - (ratio * 53); 
+    const isDark = boxL < 48;
+    return {
+      backgroundColor: `hsl(152, 76%, ${boxL}%)`,
+      borderColor: `hsl(152, 76%, ${Math.max(30, boxL - 15)}%)`,
+      color: isDark ? '#ffffff' : `hsl(152, 76%, 15%)`,
+      subColor: isDark ? 'rgba(255,255,255,0.9)' : `hsl(152, 76%, 30%)`,
+      iconBg: isDark ? 'rgba(255,255,255,0.2)' : `hsl(152, 76%, ${Math.max(30, boxL - 15)}%)`,
+      iconColor: isDark ? '#ffffff' : `hsl(152, 76%, 20%)`,
+    };
+  };
+
+  const getLastPositionBoxStyle = (days: number) => {
+    const ratio = Math.min(days / 365, 1);
+    const boxL = 50 + (ratio * 48); 
+    const isDark = boxL < 55;
+    return {
+      backgroundColor: `hsl(211, 100%, ${boxL}%)`,
+      borderColor: `hsl(211, 100%, ${Math.max(30, boxL - 15)}%)`,
+      color: isDark ? '#ffffff' : `hsl(211, 100%, 15%)`,
+      subColor: isDark ? 'rgba(255,255,255,0.9)' : `hsl(211, 100%, 35%)`,
+      iconBg: isDark ? 'rgba(255,255,255,0.2)' : `hsl(211, 100%, ${Math.max(30, boxL - 15)}%)`,
+      iconColor: isDark ? '#ffffff' : `hsl(211, 100%, 25%)`,
+      linkColor: isDark ? '#93c5fd' : `hsl(211, 100%, 40%)`,
+    };
+  };
+
+  const getSavedAppsBoxStyle = (minDays: number | null) => {
+    if (minDays === null) return null;
+    const ratio = Math.max(0, Math.min(minDays / 30, 1)); 
+    const hue = ratio * 120; 
+    const boxL = 95 - ((1 - ratio) * 45); 
+    const isDark = boxL < 55 && (hue < 20 || hue > 200);
+    return {
+      backgroundColor: `hsl(${hue}, 90%, ${boxL}%)`,
+      borderColor: `hsl(${hue}, 90%, ${Math.max(30, boxL - 15)}%)`,
+      color: isDark ? '#ffffff' : `hsl(${hue}, 90%, 15%)`,
+      subColor: isDark ? 'rgba(255,255,255,0.9)' : `hsl(${hue}, 90%, 30%)`,
+      iconBg: isDark ? 'rgba(255,255,255,0.2)' : `hsl(${hue}, 90%, ${Math.max(30, boxL - 15)}%)`,
+      iconColor: isDark ? '#ffffff' : `hsl(${hue}, 90%, 25%)`,
+      alertColor: isDark ? '#ffccd5' : `hsl(${hue}, 90%, 35%)`,
+    };
+  };
+
   if (authLoading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F5F7]">
@@ -83,9 +157,22 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[#F5F5F7]">
       <Navbar />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24">
+        {/* Banner Reminder */}
+        {!isLoading && urgentSavedCount > 0 && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 shadow-sm">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-semibold text-red-800">Action Required: Deadlines Approaching</h3>
+              <p className="text-sm text-red-700 mt-1">
+                You have {urgentSavedCount} saved {urgentSavedCount === 1 ? "application" : "applications"} with a deadline in 7 days or less. Don't forget to apply!
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Header with unemployment counter */}
-        <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
+        <div className="mb-6 sm:mb-8 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 lg:gap-8">
+          <div className="flex-1 min-w-0 w-full">
             <h1 className="text-xl sm:text-2xl font-semibold text-[#1D1D1F]">
               Hello, {displayName}
             </h1>
@@ -94,70 +181,144 @@ export default function DashboardPage() {
                 ? "Start by adding your first application."
                 : "Keep going. Consistency is key."}
             </p>
+
+            {userProfile && (
+              <MotivationBoard 
+                uid={user.uid} 
+                userProfile={userProfile} 
+                refreshProfile={refreshProfile} 
+              />
+            )}
           </div>
 
           {/* Day counters */}
-          <div className="flex flex-wrap items-start gap-3 shrink-0">
-            {/* Days since graduation counter */}
-            {daysUnemployed !== null && (
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm ${
-                daysUnemployed.hasOffering
-                  ? "bg-emerald-50 border-emerald-200"
-                  : "bg-white border-[#E8E8ED]"
-              }`}>
-                {daysUnemployed.hasOffering ? (
-                  <>
-                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-100">
-                      <GraduationCap className="w-5 h-5 text-emerald-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-emerald-700">
-                        🎉 Congratulations!
-                      </p>
-                      <p className="text-[11px] text-emerald-600">
-                        Got offering in <span className="font-bold">{daysUnemployed.days}</span> days
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#F5F5F7]">
-                      <GraduationCap className="w-5 h-5 text-[#86868B]" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold text-[#1D1D1F] leading-none tabular-nums">
-                        {daysUnemployed.days}
-                      </p>
-                      <p className="text-[11px] text-[#86868B] font-medium mt-0.5">
-                        days since graduation
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Days since last position counter */}
-            {daysSinceLastPosition !== null && (
-              <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm bg-white border-[#E8E8ED]">
-                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-50">
-                  <Briefcase className="w-5 h-5 text-[#0071E3]" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-[#1D1D1F] leading-none tabular-nums">
-                    {daysSinceLastPosition.days}
-                  </p>
-                  <p className="text-[11px] text-[#86868B] font-medium mt-0.5">
-                    days since last position
-                  </p>
-                  {daysSinceLastPosition.company && (
-                    <p className="text-[10px] text-[#0071E3] mt-0.5 truncate max-w-[140px]">
-                      {daysSinceLastPosition.position} @ {daysSinceLastPosition.company}
+          <div className="flex flex-col gap-3 shrink-0 w-full sm:w-auto">
+            {/* Urgent Saved Jobs Counter */}
+            {totalSavedCount > 0 && (() => {
+              const style = getSavedAppsBoxStyle(minDiffDays);
+              return (
+                <div 
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm w-full sm:w-[230px] shrink-0 transition-colors"
+                  style={style ? { backgroundColor: style.backgroundColor, borderColor: style.borderColor } : { backgroundColor: '#ffffff', borderColor: '#E8E8ED' }}
+                >
+                  <div 
+                    className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0"
+                    style={style ? { backgroundColor: style.iconBg } : { backgroundColor: '#F5F5F7' }}
+                  >
+                    <Bookmark 
+                      className="w-5 h-5" 
+                      style={style ? { color: style.iconColor } : { color: '#86868B' }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p 
+                      className="text-2xl font-bold leading-none tabular-nums"
+                      style={{ color: style ? style.color : '#1D1D1F' }}
+                    >
+                      {totalSavedCount}
                     </p>
+                    <p 
+                      className="text-[11px] font-medium mt-0.5 truncate"
+                      style={{ color: style ? style.subColor : '#86868B' }}
+                    >
+                      {urgentSavedCount > 0 ? (
+                        <span style={{ color: style ? style.alertColor : '#dc2626', fontWeight: 'bold' }}>{urgentSavedCount} urgent to apply!</span>
+                      ) : (
+                        "saved applications"
+                      )}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Days since graduation counter */}
+            {daysUnemployed !== null && (() => {
+              const style = getGraduationBoxStyle(daysUnemployed.days);
+              return (
+                <div 
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm w-full sm:w-[230px] shrink-0 transition-colors"
+                  style={daysUnemployed.hasOffering ? { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' } : { backgroundColor: style.backgroundColor, borderColor: style.borderColor }}
+                >
+                  {daysUnemployed.hasOffering ? (
+                    <>
+                      <div className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0 bg-emerald-100">
+                        <GraduationCap className="w-5 h-5 text-emerald-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-emerald-700">🎉 Congratulations!</p>
+                        <p className="text-[11px] text-emerald-600 truncate">
+                          Got offering in <span className="font-bold">{daysUnemployed.days}</span> days
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div 
+                        className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0"
+                        style={{ backgroundColor: style.iconBg }}
+                      >
+                        <GraduationCap className="w-5 h-5" style={{ color: style.iconColor }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p 
+                          className="text-2xl font-bold leading-none tabular-nums"
+                          style={{ color: style.color }}
+                        >
+                          {daysUnemployed.days}
+                        </p>
+                        <p 
+                          className="text-[11px] font-medium mt-0.5 truncate"
+                          style={{ color: style.subColor }}
+                        >
+                          days since graduation
+                        </p>
+                      </div>
+                    </>
                   )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
+
+            {/* Days since last position counter */}
+            {daysSinceLastPosition !== null && (() => {
+              const style = getLastPositionBoxStyle(daysSinceLastPosition.days);
+              return (
+                <div 
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm w-full sm:w-[230px] shrink-0 transition-colors"
+                  style={{ backgroundColor: style.backgroundColor, borderColor: style.borderColor }}
+                >
+                  <div 
+                    className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0"
+                    style={{ backgroundColor: style.iconBg }}
+                  >
+                    <Briefcase className="w-5 h-5" style={{ color: style.iconColor }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p 
+                      className="text-2xl font-bold leading-none tabular-nums"
+                      style={{ color: style.color }}
+                    >
+                      {daysSinceLastPosition.days}
+                    </p>
+                    <p 
+                      className="text-[11px] font-medium mt-0.5 truncate"
+                      style={{ color: style.subColor }}
+                    >
+                      days since last position
+                    </p>
+                    {daysSinceLastPosition.company && (
+                      <p 
+                        className="text-[10px] mt-0.5 truncate"
+                        style={{ color: style.linkColor }}
+                      >
+                        {daysSinceLastPosition.position} @ {daysSinceLastPosition.company}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
