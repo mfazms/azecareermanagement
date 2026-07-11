@@ -24,6 +24,7 @@ export default function MotivationBoard({
     if (!file) return;
 
     try {
+      if (!storage) throw new Error("Storage not initialized");
       setIsUploading(true);
       const storageRef = ref(storage, `users/${uid}/motivation/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
