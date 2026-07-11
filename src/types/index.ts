@@ -132,6 +132,17 @@ export interface RejectionReasonData {
   count: number;
 }
 
+export interface SkillCategory {
+  name: string;
+  skills: string[];
+}
+
+export interface LastPosition {
+  company: string;
+  position: string;
+  endDate: string;
+}
+
 export interface UserProfile {
   id: string;
   displayName?: string;
@@ -143,4 +154,35 @@ export interface UserProfile {
   customLinks?: { label: string; url: string }[];
   photoBase64?: string;
   graduationDate?: string;
+  professionalSummary?: string;
+  skills?: SkillCategory[];
+  lastPosition?: LastPosition;
+  currentLocation?: string;
+  dateOfBirth?: string;
+  mbti?: string;
+  dreamPosition?: string;
 }
+
+export interface StorageUsage {
+  applications: number;
+  cvFiles: number;
+  evaluations: number;
+  profileData: number;
+  total: number;
+  limit: number;
+}
+
+export const MBTI_TYPES = [
+  "INTJ", "INTP", "ENTJ", "ENTP",
+  "INFJ", "INFP", "ENFJ", "ENFP",
+  "ISTJ", "ISFJ", "ESTJ", "ESFJ",
+  "ISTP", "ISFP", "ESTP", "ESFP",
+] as const;
+
+export const DEFAULT_SKILL_CATEGORIES = [
+  "Competencies",
+  "Soft Skills",
+  "Hard Skills",
+] as const;
+
+export const STORAGE_LIMIT_BYTES = 500 * 1024 * 1024; // 500 MB

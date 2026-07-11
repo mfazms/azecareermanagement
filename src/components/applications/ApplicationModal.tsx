@@ -24,7 +24,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import EvaluationForm from "./EvaluationForm";
 import { Loader2, Upload, FileText, Download, X } from "lucide-react";
-import { downloadBase64File } from "@/lib/storage";
+import { downloadCvFile } from "@/lib/storage";
 
 interface ApplicationModalProps {
   isOpen: boolean;
@@ -276,6 +276,8 @@ function FormFields({
   isSaving, onSave, cvFile, existingCvUrl, existingCvName,
   fileInputRef, onFileChange, onRemoveFile,
 }: FormFieldsProps) {
+  const isFileOverOneMB = cvFile ? cvFile.size > 1 * 1024 * 1024 : false;
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -391,7 +393,12 @@ function FormFields({
             <FileText className="w-5 h-5 text-[#0071E3] shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-[#1D1D1F] truncate">{cvFile.name}</p>
-              <p className="text-xs text-[#86868B]">{(cvFile.size / 1024).toFixed(0)} KB — Ready to upload</p>
+              <p className="text-xs text-[#86868B]">
+                {(cvFile.size / 1024).toFixed(0)} KB — Ready to upload
+                {isFileOverOneMB && (
+                  <span className="text-amber-600 font-medium"> • Will be auto-compressed</span>
+                )}
+              </p>
             </div>
             <button
               type="button"
@@ -410,7 +417,7 @@ function FormFields({
             </div>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); downloadBase64File(existingCvUrl, existingCvName); }}
+              onClick={(e) => { e.stopPropagation(); downloadCvFile(existingCvUrl, existingCvName); }}
               className="p-1.5 hover:bg-[#E8E8ED] rounded-lg transition-colors cursor-pointer"
             >
               <Download className="w-4 h-4 text-[#0071E3]" />

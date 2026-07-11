@@ -16,7 +16,7 @@ import HiringRoadmap from "@/components/dashboard/HiringRoadmap";
 import { getApplications } from "@/lib/firestore";
 import type { Application, KPIData, FunnelData, RejectionReasonData } from "@/types";
 import { FUNNEL_STAGES } from "@/types";
-import { Loader2, GraduationCap } from "lucide-react";
+import { Loader2, GraduationCap, Briefcase } from "lucide-react";
 
 export default function DashboardPage() {
   const { user, userProfile, loading: authLoading } = useAuth();
@@ -62,6 +62,15 @@ export default function DashboardPage() {
     return { days: Math.max(diff, 0), hasOffering: !!offeringApp };
   })();
 
+  // Compute days since last position
+  const daysSinceLastPosition = (() => {
+    if (!userProfile?.lastPosition?.endDate) return null;
+    const endDate = new Date(userProfile.lastPosition.endDate);
+    if (isNaN(endDate.getTime())) return null;
+    const diff = Math.floor((new Date().getTime() - endDate.getTime()) / (1000 * 60 * 60 * 24));
+    return { days: Math.max(diff, 0), company: userProfile.lastPosition.company, position: userProfile.lastPosition.position };
+  })();
+
   if (authLoading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F5F7]">
@@ -87,44 +96,69 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* Days since graduation counter */}
-          {daysUnemployed !== null && (
-            <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm shrink-0 ${
-              daysUnemployed.hasOffering
-                ? "bg-emerald-50 border-emerald-200"
-                : "bg-white border-[#E8E8ED]"
-            }`}>
-              {daysUnemployed.hasOffering ? (
-                <>
-                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-100">
-                    <GraduationCap className="w-5 h-5 text-emerald-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-emerald-700">
-                      🎉 Congratulations!
+          {/* Day counters */}
+          <div className="flex flex-wrap items-start gap-3 shrink-0">
+            {/* Days since graduation counter */}
+            {daysUnemployed !== null && (
+              <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm ${
+                daysUnemployed.hasOffering
+                  ? "bg-emerald-50 border-emerald-200"
+                  : "bg-white border-[#E8E8ED]"
+              }`}>
+                {daysUnemployed.hasOffering ? (
+                  <>
+                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-100">
+                      <GraduationCap className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-emerald-700">
+                        🎉 Congratulations!
+                      </p>
+                      <p className="text-[11px] text-emerald-600">
+                        Got offering in <span className="font-bold">{daysUnemployed.days}</span> days
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#F5F5F7]">
+                      <GraduationCap className="w-5 h-5 text-[#86868B]" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-[#1D1D1F] leading-none tabular-nums">
+                        {daysUnemployed.days}
+                      </p>
+                      <p className="text-[11px] text-[#86868B] font-medium mt-0.5">
+                        days since graduation
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Days since last position counter */}
+            {daysSinceLastPosition !== null && (
+              <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm bg-white border-[#E8E8ED]">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-50">
+                  <Briefcase className="w-5 h-5 text-[#0071E3]" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-[#1D1D1F] leading-none tabular-nums">
+                    {daysSinceLastPosition.days}
+                  </p>
+                  <p className="text-[11px] text-[#86868B] font-medium mt-0.5">
+                    days since last position
+                  </p>
+                  {daysSinceLastPosition.company && (
+                    <p className="text-[10px] text-[#0071E3] mt-0.5 truncate max-w-[140px]">
+                      {daysSinceLastPosition.position} @ {daysSinceLastPosition.company}
                     </p>
-                    <p className="text-[11px] text-emerald-600">
-                      Got offering in <span className="font-bold">{daysUnemployed.days}</span> days
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#F5F5F7]">
-                    <GraduationCap className="w-5 h-5 text-[#86868B]" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-[#1D1D1F] leading-none tabular-nums">
-                      {daysUnemployed.days}
-                    </p>
-                    <p className="text-[11px] text-[#86868B] font-medium mt-0.5">
-                      days since graduation
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {isLoading ? (

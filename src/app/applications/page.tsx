@@ -14,7 +14,7 @@ import {
   updateEvaluation,
   deleteApplication,
 } from "@/lib/firestore";
-import { fileToBase64 } from "@/lib/storage";
+import { processFileForStorage, generateCvFileName } from "@/lib/storage";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
@@ -57,12 +57,24 @@ export default function ApplicationsPage() {
       let cvFileName = (data as Record<string, unknown>).cvFileName as string || "";
 
       if (cvFile) {
-        if (cvFile.size > 900 * 1024) {
-          toast.error("CV file must be under 900KB");
+        try {
+          const { base64Data } = await processFileForStorage(cvFile);
+          cvFileUrl = base64Data;
+          // Auto-rename: Company_Position_DateApplied_Resume.ext
+          cvFileName = generateCvFileName(
+            data.company,
+            data.position,
+            data.dateApplied,
+            cvFile.name
+          );
+        } catch (err) {
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Failed to process CV file. Please try a smaller file."
+          );
           return;
         }
-        cvFileUrl = await fileToBase64(cvFile);
-        cvFileName = cvFile.name;
       }
 
       const saveData = { ...data, cvFileUrl, cvFileName };
