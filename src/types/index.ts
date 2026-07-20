@@ -162,7 +162,7 @@ export interface UserProfile {
   dateOfBirth?: string;
   mbti?: string;
   dreamPosition?: string;
-  motivationImageUrl?: string;
+  motivationImageBase64?: string;
 }
 
 export interface StorageUsage {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import DeadlinePopup from "@/components/dashboard/DeadlinePopup";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
@@ -24,6 +25,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [applications, setApplications] = useState<Application[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showDeadlinePopup, setShowDeadlinePopup] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -159,15 +161,19 @@ export default function DashboardPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24">
         {/* Banner Reminder */}
         {!isLoading && urgentSavedCount > 0 && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 shadow-sm">
+          <button
+            onClick={() => setShowDeadlinePopup(true)}
+            className="mb-6 w-full bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 shadow-sm hover:bg-red-100 hover:shadow-md transition-all cursor-pointer text-left"
+          >
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
             <div>
               <h3 className="text-sm font-semibold text-red-800">Action Required: Deadlines Approaching</h3>
               <p className="text-sm text-red-700 mt-1">
-                You have {urgentSavedCount} saved {urgentSavedCount === 1 ? "application" : "applications"} with a deadline in 7 days or less. Don't forget to apply!
+                You have {urgentSavedCount} saved {urgentSavedCount === 1 ? "application" : "applications"} with a deadline in 7 days or less. Don&apos;t forget to apply!
               </p>
+              <p className="text-xs text-red-500 mt-1.5 font-medium">Click to view details →</p>
             </div>
-          </div>
+          </button>
         )}
 
         {/* Header with unemployment counter */}
@@ -197,8 +203,9 @@ export default function DashboardPage() {
             {totalSavedCount > 0 && (() => {
               const style = getSavedAppsBoxStyle(minDiffDays);
               return (
-                <div 
-                  className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm w-full sm:w-[230px] shrink-0 transition-colors"
+                <button 
+                  onClick={() => setShowDeadlinePopup(true)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-sm w-full sm:w-[230px] shrink-0 transition-all hover:shadow-md hover:scale-[1.02] cursor-pointer text-left"
                   style={style ? { backgroundColor: style.backgroundColor, borderColor: style.borderColor } : { backgroundColor: '#ffffff', borderColor: '#E8E8ED' }}
                 >
                   <div 
@@ -228,7 +235,7 @@ export default function DashboardPage() {
                       )}
                     </p>
                   </div>
-                </div>
+                </button>
               );
             })()}
 
@@ -352,6 +359,13 @@ export default function DashboardPage() {
           </div>
         )}
       </main>
+
+      {/* Deadline Popup */}
+      <DeadlinePopup
+        applications={applications}
+        isOpen={showDeadlinePopup}
+        onClose={() => setShowDeadlinePopup(false)}
+      />
     </div>
   );
 }

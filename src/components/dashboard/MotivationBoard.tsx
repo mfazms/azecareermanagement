@@ -2,10 +2,11 @@
 
 import { useState, useRef } from "react";
 import { ImagePlus, Loader2, X } from "lucide-react";
-import { storage } from "@/lib/firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { updateUserProfile } from "@/lib/firestore";
 import type { UserProfile } from "@/types";
+import { toast } from "sonner";
+
+const MAX_MOTIVATION_SIZE = 800 * 1024; // 800KB max for the base64 image
 
 export default function MotivationBoard({
   uid,
@@ -19,21 +20,83 @@ export default function MotivationBoard({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const compressImage = (base64: string, maxWidth: number, quality: number): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let { width, height } = img;
+
+        // Scale down if larger than maxWidth
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("Canvas context failed")); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = base64;
+    });
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file.");
+      return;
+    }
+
     try {
-      if (!storage) throw new Error("Storage not initialized");
       setIsUploading(true);
-      const storageRef = ref(storage, `users/${uid}/motivation/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      
-      await updateUserProfile(uid, { motivationImageUrl: url });
+      let base64 = await fileToBase64(file);
+
+      // Compress if too large
+      const base64Size = base64.length;
+      if (base64Size > MAX_MOTIVATION_SIZE) {
+        // Progressively compress with lower quality and smaller dimensions
+        const attempts = [
+          { maxWidth: 1920, quality: 0.7 },
+          { maxWidth: 1280, quality: 0.6 },
+          { maxWidth: 1024, quality: 0.5 },
+          { maxWidth: 800,  quality: 0.4 },
+          { maxWidth: 640,  quality: 0.3 },
+        ];
+
+        for (const { maxWidth, quality } of attempts) {
+          base64 = await compressImage(base64, maxWidth, quality);
+          if (base64.length <= MAX_MOTIVATION_SIZE) break;
+        }
+
+        if (base64.length > MAX_MOTIVATION_SIZE) {
+          toast.error("Image is too large even after compression. Please use a smaller image.");
+          return;
+        }
+      }
+
+      await updateUserProfile(uid, { motivationImageBase64: base64 });
       await refreshProfile();
+      toast.success("Motivation board updated!");
     } catch (error) {
       console.error("Error uploading motivation image:", error);
+      toast.error("Failed to upload image. Please try again.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -44,28 +107,33 @@ export default function MotivationBoard({
 
   const handleRemove = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!userProfile?.motivationImageUrl) return;
+    if (!userProfile?.motivationImageBase64) return;
     try {
-      await updateUserProfile(uid, { motivationImageUrl: "" });
+      await updateUserProfile(uid, { motivationImageBase64: "" });
       await refreshProfile();
+      toast.success("Motivation photo removed.");
     } catch (error) {
       console.error("Error removing motivation image:", error);
+      toast.error("Failed to remove image.");
     }
   };
+
+  const hasImage = !!userProfile?.motivationImageBase64;
 
   return (
     <div className="relative group rounded-2xl border border-[#E8E8ED] shadow-sm bg-white overflow-hidden w-full h-48 sm:h-56 mt-4">
       {isUploading ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-20">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-20 gap-2">
           <Loader2 className="w-6 h-6 animate-spin text-[#0071E3]" />
+          <p className="text-xs text-[#86868B]">Uploading & compressing...</p>
         </div>
-      ) : userProfile?.motivationImageUrl ? (
+      ) : hasImage ? (
         <div 
           className="relative w-full h-full cursor-pointer" 
           onClick={() => fileInputRef.current?.click()}
         >
            <img 
-             src={userProfile.motivationImageUrl} 
+             src={userProfile.motivationImageBase64} 
              alt="Motivation Board" 
              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
            />
@@ -75,7 +143,7 @@ export default function MotivationBoard({
              <h3 className="text-white font-medium text-sm drop-shadow-md">Motivation Board</h3>
              <button 
                onClick={handleRemove} 
-               className="text-white/80 hover:text-white bg-black/30 p-1.5 rounded-lg backdrop-blur-sm transition-colors"
+               className="text-white/80 hover:text-white bg-black/30 p-1.5 rounded-lg backdrop-blur-sm transition-colors cursor-pointer"
                title="Remove Photo"
              >
                <X className="w-4 h-4" />
@@ -101,7 +169,7 @@ export default function MotivationBoard({
 
       <input 
         type="file" 
-        accept="image/*" 
+        accept="image/png, image/jpeg, image/webp" 
         className="hidden" 
         ref={fileInputRef} 
         onChange={handleFileChange}
