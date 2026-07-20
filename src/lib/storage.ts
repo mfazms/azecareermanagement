@@ -141,16 +141,19 @@ async function storeInChunks(uid: string, fileId: string, base64Data: string, mi
 export async function getFileFromChunks(uid: string, fileId: string): Promise<{ base64Data: string; mimeType: string } | null> {
   if (!db) return null;
   const chunksRef = collection(db, "users", uid, "file_chunks");
-  const q = query(chunksRef, where("fileId", "==", fileId), orderBy("index", "asc"));
+  const q = query(chunksRef, where("fileId", "==", fileId));
   const querySnapshot = await getDocs(q);
 
   if (querySnapshot.empty) return null;
 
+  const chunks = querySnapshot.docs.map(doc => doc.data());
+  // Sort in memory to avoid requiring a composite index in Firestore
+  chunks.sort((a, b) => a.index - b.index);
+
   let fullData = "";
   let mimeType = "";
 
-  querySnapshot.forEach((doc) => {
-    const data = doc.data();
+  chunks.forEach((data) => {
     fullData += data.data;
     if (data.index === 0) mimeType = data.mimeType;
   });
