@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import ApplicationTable from "@/components/applications/ApplicationTable";
 import ApplicationModal from "@/components/applications/ApplicationModal";
@@ -18,13 +18,29 @@ import { uploadCvFile, generateCvFileName } from "@/lib/storage";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
-export default function ApplicationsPage() {
+function ApplicationsContent() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const highlightAppId = searchParams.get("highlight");
+
   const [applications, setApplications] = useState<Application[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingApp, setEditingApp] = useState<Application | null>(null);
+
+  // Auto-open modal if highlight parameter is present
+  useEffect(() => {
+    if (applications.length > 0 && highlightAppId) {
+      const appToHighlight = applications.find(a => a.id === highlightAppId);
+      if (appToHighlight) {
+        setEditingApp(appToHighlight);
+        setModalOpen(true);
+        // Clean up URL without triggering navigation
+        router.replace("/applications", { scroll: false });
+      }
+    }
+  }, [applications, highlightAppId, router]);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -160,5 +176,17 @@ export default function ApplicationsPage() {
         />
       </main>
     </div>
+  );
+}
+
+export default function ApplicationsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-[#F5F5F7]">
+        <Loader2 className="w-8 h-8 animate-spin text-[#0071E3]" />
+      </div>
+    }>
+      <ApplicationsContent />
+    </Suspense>
   );
 }
