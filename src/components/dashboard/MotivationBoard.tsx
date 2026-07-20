@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ImagePlus, Loader2, X } from "lucide-react";
 import { updateUserProfile } from "@/lib/firestore";
-import { uploadMotivationImage } from "@/lib/storage";
+import { uploadMotivationImage, getMotivationImageUrl } from "@/lib/storage";
 import type { UserProfile } from "@/types";
 import { toast } from "sonner";
 
@@ -17,7 +17,28 @@ export default function MotivationBoard({
   refreshProfile: () => Promise<void>;
 }) {
   const [isUploading, setIsUploading] = useState(false);
+  const [resolvedImageUrl, setResolvedImageUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Support both old base64 and new URL format
+  const imageSource = userProfile?.motivationImageUrl || userProfile?.motivationImageBase64 || "";
+  const hasImage = !!imageSource;
+
+  useEffect(() => {
+    async function loadImg() {
+      if (!imageSource) {
+        setResolvedImageUrl("");
+        return;
+      }
+      try {
+        const url = await getMotivationImageUrl(imageSource);
+        setResolvedImageUrl(url);
+      } catch (e) {
+        console.error("Error resolving motivation image:", e);
+      }
+    }
+    loadImg();
+  }, [imageSource]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -32,11 +53,11 @@ export default function MotivationBoard({
     try {
       setIsUploading(true);
 
-      // Upload to Firebase Storage, get download URL
+      // Upload to Firestore chunks, get firestore:// URL
       const url = await uploadMotivationImage(uid, file);
 
       // Save only the URL in Firestore (not the image data)
-      await updateUserProfile(uid, { motivationImageUrl: url });
+      await updateUserProfile(uid, { motivationImageUrl: url, motivationImageBase64: "" });
       await refreshProfile();
       toast.success("Motivation board updated!");
     } catch (error) {
@@ -56,8 +77,7 @@ export default function MotivationBoard({
 
   const handleRemove = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const imageUrl = userProfile?.motivationImageUrl || userProfile?.motivationImageBase64;
-    if (!imageUrl) return;
+    if (!hasImage) return;
     try {
       await updateUserProfile(uid, { motivationImageUrl: "", motivationImageBase64: "" });
       await refreshProfile();
@@ -67,10 +87,6 @@ export default function MotivationBoard({
       toast.error("Failed to remove image.");
     }
   };
-
-  // Support both old base64 and new URL format
-  const imageSource = userProfile?.motivationImageUrl || userProfile?.motivationImageBase64 || "";
-  const hasImage = !!imageSource;
 
   return (
     <div className="relative group rounded-2xl border border-[#E8E8ED] shadow-sm bg-white overflow-hidden w-full h-48 sm:h-56 mt-4">
@@ -84,12 +100,18 @@ export default function MotivationBoard({
           className="relative w-full h-full cursor-pointer" 
           onClick={() => fileInputRef.current?.click()}
         >
-           <img 
-             src={imageSource} 
-             alt="Motivation Board" 
-             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-             referrerPolicy="no-referrer"
-           />
+           {resolvedImageUrl ? (
+             <img 
+               src={resolvedImageUrl} 
+               alt="Motivation Board" 
+               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+               referrerPolicy="no-referrer"
+             />
+           ) : (
+             <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+               <Loader2 className="w-6 h-6 animate-spin text-[#0071E3]" />
+             </div>
+           )}
            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
            
            <div className="absolute inset-x-0 top-0 p-4 bg-gradient-to-b from-black/60 to-transparent z-10 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">

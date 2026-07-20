@@ -1,35 +1,60 @@
 // ============================================
-// File Storage Service
-// Uses Firebase Storage for actual file data
-// Stores only download URLs in Firestore
+// File Storage Service (Firestore Chunking)
+// Uses Firestore to store files as chunks to bypass the 1MB document limit,
+// avoiding the need for Firebase Storage (which requires Blaze plan).
 // ============================================
 
-import { storage } from "./firebase";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { db } from "./firebase";
+import { doc, setDoc, getDocs, collection, query, where, orderBy, deleteDoc } from "firebase/firestore";
 
+const CHUNK_SIZE = 800 * 1024; // 800KB per chunk
 const MAX_CV_SIZE = 5 * 1024 * 1024; // 5MB max for CV files
 const MAX_IMAGE_SIZE = 3 * 1024 * 1024; // 3MB max for images
-const UPLOAD_TIMEOUT_MS = 15000; // 15 seconds timeout
 
 /**
- * Helper to wrap a promise with a timeout
+ * Compress image using Canvas API
  */
-async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> {
-  let timeoutHandle: NodeJS.Timeout;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => reject(new Error(errorMessage)), ms);
-  });
+async function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 1280;
+        const MAX_HEIGHT = 1280;
+        let width = img.width;
+        let height = img.height;
 
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    clearTimeout(timeoutHandle!);
-  }
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        // Compress to JPEG with 0.8 quality
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+        resolve(dataUrl);
+      };
+      img.onerror = (error) => reject(error);
+    };
+    reader.onerror = (error) => reject(error);
+  });
 }
 
 /**
- * Generate standardized CV filename:
- * Company_Position_DateApplied_Resume.ext
+ * Generate standardized CV filename
  */
 export function generateCvFileName(
   company: string,
@@ -54,8 +79,105 @@ export function generateCvFileName(
 }
 
 /**
- * Upload a CV file to Firebase Storage.
- * Returns the download URL to store in Firestore.
+ * Compress a File using gzip (browser-native CompressionStream API)
+ */
+async function compressFile(file: File): Promise<Uint8Array> {
+  const stream = file.stream();
+  const compressedStream = stream.pipeThrough(new CompressionStream("gzip"));
+  const reader = compressedStream.getReader();
+
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    totalLength += value.length;
+  }
+
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
+/**
+ * Store a large base64 string in Firestore chunks
+ */
+async function storeInChunks(fileId: string, base64Data: string, mimeType: string): Promise<string> {
+  if (!db) throw new Error("Firestore not initialized");
+  
+  const chunks = [];
+  for (let i = 0; i < base64Data.length; i += CHUNK_SIZE) {
+    chunks.push(base64Data.slice(i, i + CHUNK_SIZE));
+  }
+
+  const totalChunks = chunks.length;
+
+  for (let i = 0; i < totalChunks; i++) {
+    const chunkId = `${fileId}_${i}`;
+    const chunkRef = doc(db, "file_chunks", chunkId);
+    await setDoc(chunkRef, {
+      fileId,
+      index: i,
+      totalChunks,
+      data: chunks[i],
+      mimeType,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  return `firestore://${fileId}`;
+}
+
+/**
+ * Read a file from Firestore chunks
+ */
+export async function getFileFromChunks(fileId: string): Promise<{ base64Data: string; mimeType: string } | null> {
+  if (!db) return null;
+  const chunksRef = collection(db, "file_chunks");
+  const q = query(chunksRef, where("fileId", "==", fileId), orderBy("index", "asc"));
+  const querySnapshot = await getDocs(q);
+
+  if (querySnapshot.empty) return null;
+
+  let fullData = "";
+  let mimeType = "";
+
+  querySnapshot.forEach((doc) => {
+    const data = doc.data();
+    fullData += data.data;
+    if (data.index === 0) mimeType = data.mimeType;
+  });
+
+  return { base64Data: fullData, mimeType };
+}
+
+/**
+ * Delete a file from Firestore chunks
+ */
+export async function deleteStorageFile(url: string): Promise<void> {
+  if (!db || !url.startsWith("firestore://")) return;
+  try {
+    const fileId = url.replace("firestore://", "");
+    const chunksRef = collection(db, "file_chunks");
+    const q = query(chunksRef, where("fileId", "==", fileId));
+    const querySnapshot = await getDocs(q);
+    
+    for (const docSnapshot of querySnapshot.docs) {
+      await deleteDoc(docSnapshot.ref);
+    }
+  } catch (err) {
+    console.error("Error deleting chunks:", err);
+  }
+}
+
+/**
+ * Upload a CV file
  */
 export async function uploadCvFile(
   uid: string,
@@ -63,67 +185,38 @@ export async function uploadCvFile(
   file: File,
   fileName: string
 ): Promise<string> {
-  if (!storage) throw new Error("Firebase Storage is not initialized. Please check your Firebase configuration.");
+  if (!db) throw new Error("Firestore is not initialized.");
   if (file.size > MAX_CV_SIZE) throw new Error(`File is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum is 5MB.`);
 
-  const storagePath = `users/${uid}/cv/${applicationId}/${fileName}`;
-  const storageRef = ref(storage, storagePath);
-
-  try {
-    await withTimeout(
-      uploadBytes(storageRef, file), 
-      UPLOAD_TIMEOUT_MS, 
-      "Upload timed out. Please ensure Firebase Storage is initialized in your console and rules are set."
-    );
-    const url = await getDownloadURL(storageRef);
-    return url;
-  } catch (error) {
-    console.error("Storage upload error:", error);
-    throw error;
+  const compressed = await compressFile(file);
+  let binary = "";
+  for (let i = 0; i < compressed.length; i++) {
+    binary += String.fromCharCode(compressed[i]);
   }
+  const base64Data = btoa(binary);
+  const fileId = `cv_${uid}_${applicationId}_${Date.now()}`;
+  
+  return await storeInChunks(fileId, base64Data, "application/gzip");
 }
 
 /**
- * Upload a motivation board image to Firebase Storage.
- * Returns the download URL.
+ * Upload a motivation board image
  */
 export async function uploadMotivationImage(
   uid: string,
   file: File
 ): Promise<string> {
-  if (!storage) throw new Error("Firebase Storage is not initialized. Please check your Firebase configuration.");
+  if (!db) throw new Error("Firestore is not initialized.");
   if (file.size > MAX_IMAGE_SIZE) throw new Error(`Image is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum is 3MB.`);
 
-  const storagePath = `users/${uid}/motivation/board_${Date.now()}.${file.name.split(".").pop()?.toLowerCase() || "jpg"}`;
-  const storageRef = ref(storage, storagePath);
-
-  try {
-    await withTimeout(
-      uploadBytes(storageRef, file), 
-      UPLOAD_TIMEOUT_MS, 
-      "Upload timed out. Please ensure Firebase Storage is initialized in your console and rules are set."
-    );
-    const url = await getDownloadURL(storageRef);
-    return url;
-  } catch (error) {
-    console.error("Storage upload error:", error);
-    throw error;
-  }
-}
-
-/**
- * Delete a file from Firebase Storage by URL.
- * Silently handles errors (file might not exist).
- */
-export async function deleteStorageFile(downloadUrl: string): Promise<void> {
-  if (!storage || !downloadUrl) return;
-  try {
-    // Extract path from the download URL
-    const storageRef = ref(storage, downloadUrl);
-    await deleteObject(storageRef);
-  } catch {
-    // File might already be deleted, ignore
-  }
+  const compressedBase64 = await compressImage(file);
+  // compressedBase64 contains the data URL (e.g. data:image/jpeg;base64,...)
+  // We extract just the base64 part for chunking
+  const base64Data = compressedBase64.split(",")[1];
+  const mimeType = compressedBase64.split(";")[0].split(":")[1];
+  
+  const fileId = `motivation_${uid}_${Date.now()}`;
+  return await storeInChunks(fileId, base64Data, mimeType);
 }
 
 /**
@@ -139,11 +232,29 @@ export function fileToBase64(file: File): Promise<string> {
 }
 
 /**
- * Download a file from a URL (for Firebase Storage URLs).
- * Opens in a new tab for viewing/downloading.
+ * Fetch a motivation image URL to display in an <img> tag
  */
-export function downloadCvFile(url: string, fileName: string) {
-  // For Firebase Storage URLs, open in new tab
+export async function getMotivationImageUrl(urlOrBase64: string): Promise<string> {
+  if (!urlOrBase64) return "";
+  if (urlOrBase64.startsWith("data:") || urlOrBase64.startsWith("http")) return urlOrBase64;
+  
+  if (urlOrBase64.startsWith("firestore://")) {
+    const fileId = urlOrBase64.replace("firestore://", "");
+    const fileData = await getFileFromChunks(fileId);
+    if (fileData) {
+      return `data:${fileData.mimeType};base64,${fileData.base64Data}`;
+    }
+  }
+  return "";
+}
+
+/**
+ * Download a CV file
+ */
+export async function downloadCvFile(url: string, fileName: string) {
+  if (!url) return;
+
+  // External URLs (e.g. legacy Firebase Storage)
   if (url.startsWith("https://")) {
     const link = document.createElement("a");
     link.href = url;
@@ -156,24 +267,42 @@ export function downloadCvFile(url: string, fileName: string) {
     return;
   }
 
-  // Legacy: base64 data URLs (old format, backward compatible)
+  // Legacy raw data URL
   if (url.startsWith("data:")) {
-    // Check if it's gzip compressed (old format)
     if (url.startsWith("data:application/gzip")) {
-      downloadCompressedBase64(url, fileName);
-      return;
+      await downloadCompressedBase64(url, fileName);
+    } else {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return;
+  }
+
+  // New Firestore Chunking format
+  if (url.startsWith("firestore://")) {
+    const fileId = url.replace("firestore://", "");
+    const fileData = await getFileFromChunks(fileId);
+    if (fileData) {
+      if (fileData.mimeType === "application/gzip") {
+        await downloadCompressedBase64(`data:application/gzip;base64,${fileData.base64Data}`, fileName);
+      } else {
+        const link = document.createElement("a");
+        link.href = `data:${fileData.mimeType};base64,${fileData.base64Data}`;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    }
   }
 }
 
 /**
- * Legacy: decompress and download old gzip-compressed base64 files
+ * Legacy: decompress and download gzip-compressed base64 files
  */
 async function downloadCompressedBase64(dataUrl: string, fileName: string) {
   try {
@@ -218,15 +347,15 @@ async function downloadCompressedBase64(dataUrl: string, fileName: string) {
             : "application/octet-stream";
 
     const blob = new Blob([result.buffer as ArrayBuffer], { type: mimeType });
-    const url = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url;
+    link.href = blobUrl;
     link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(blobUrl);
   } catch {
-    console.error("Failed to decompress legacy file");
+    console.error("Failed to decompress file");
   }
 }
