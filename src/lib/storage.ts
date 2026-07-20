@@ -108,7 +108,7 @@ async function compressFile(file: File): Promise<Uint8Array> {
 /**
  * Store a large base64 string in Firestore chunks
  */
-async function storeInChunks(fileId: string, base64Data: string, mimeType: string): Promise<string> {
+async function storeInChunks(uid: string, fileId: string, base64Data: string, mimeType: string): Promise<string> {
   if (!db) throw new Error("Firestore not initialized");
   
   const chunks = [];
@@ -117,11 +117,12 @@ async function storeInChunks(fileId: string, base64Data: string, mimeType: strin
   }
 
   const totalChunks = chunks.length;
+  const chunksRef = collection(db, "users", uid, "file_chunks");
 
   for (let i = 0; i < totalChunks; i++) {
     const chunkId = `${fileId}_${i}`;
-    const chunkRef = doc(db, "file_chunks", chunkId);
-    await setDoc(chunkRef, {
+    const chunkDoc = doc(chunksRef, chunkId);
+    await setDoc(chunkDoc, {
       fileId,
       index: i,
       totalChunks,
@@ -131,15 +132,15 @@ async function storeInChunks(fileId: string, base64Data: string, mimeType: strin
     });
   }
 
-  return `firestore://${fileId}`;
+  return `firestore://${uid}/${fileId}`;
 }
 
 /**
  * Read a file from Firestore chunks
  */
-export async function getFileFromChunks(fileId: string): Promise<{ base64Data: string; mimeType: string } | null> {
+export async function getFileFromChunks(uid: string, fileId: string): Promise<{ base64Data: string; mimeType: string } | null> {
   if (!db) return null;
-  const chunksRef = collection(db, "file_chunks");
+  const chunksRef = collection(db, "users", uid, "file_chunks");
   const q = query(chunksRef, where("fileId", "==", fileId), orderBy("index", "asc"));
   const querySnapshot = await getDocs(q);
 
@@ -163,8 +164,12 @@ export async function getFileFromChunks(fileId: string): Promise<{ base64Data: s
 export async function deleteStorageFile(url: string): Promise<void> {
   if (!db || !url.startsWith("firestore://")) return;
   try {
-    const fileId = url.replace("firestore://", "");
-    const chunksRef = collection(db, "file_chunks");
+    const pathParts = url.replace("firestore://", "").split("/");
+    if (pathParts.length !== 2) return;
+    const uid = pathParts[0];
+    const fileId = pathParts[1];
+
+    const chunksRef = collection(db, "users", uid, "file_chunks");
     const q = query(chunksRef, where("fileId", "==", fileId));
     const querySnapshot = await getDocs(q);
     
@@ -196,7 +201,7 @@ export async function uploadCvFile(
   const base64Data = btoa(binary);
   const fileId = `cv_${uid}_${applicationId}_${Date.now()}`;
   
-  return await storeInChunks(fileId, base64Data, "application/gzip");
+  return await storeInChunks(uid, fileId, base64Data, "application/gzip");
 }
 
 /**
@@ -216,7 +221,7 @@ export async function uploadMotivationImage(
   const mimeType = compressedBase64.split(";")[0].split(":")[1];
   
   const fileId = `motivation_${uid}_${Date.now()}`;
-  return await storeInChunks(fileId, base64Data, mimeType);
+  return await storeInChunks(uid, fileId, base64Data, mimeType);
 }
 
 /**
@@ -239,8 +244,12 @@ export async function getMotivationImageUrl(urlOrBase64: string): Promise<string
   if (urlOrBase64.startsWith("data:") || urlOrBase64.startsWith("http")) return urlOrBase64;
   
   if (urlOrBase64.startsWith("firestore://")) {
-    const fileId = urlOrBase64.replace("firestore://", "");
-    const fileData = await getFileFromChunks(fileId);
+    const pathParts = urlOrBase64.replace("firestore://", "").split("/");
+    if (pathParts.length !== 2) return "";
+    const uid = pathParts[0];
+    const fileId = pathParts[1];
+    
+    const fileData = await getFileFromChunks(uid, fileId);
     if (fileData) {
       return `data:${fileData.mimeType};base64,${fileData.base64Data}`;
     }
@@ -284,18 +293,22 @@ export async function downloadCvFile(url: string, fileName: string) {
 
   // New Firestore Chunking format
   if (url.startsWith("firestore://")) {
-    const fileId = url.replace("firestore://", "");
-    const fileData = await getFileFromChunks(fileId);
-    if (fileData) {
-      if (fileData.mimeType === "application/gzip") {
-        await downloadCompressedBase64(`data:application/gzip;base64,${fileData.base64Data}`, fileName);
-      } else {
-        const link = document.createElement("a");
-        link.href = `data:${fileData.mimeType};base64,${fileData.base64Data}`;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    const pathParts = url.replace("firestore://", "").split("/");
+    if (pathParts.length === 2) {
+      const uid = pathParts[0];
+      const fileId = pathParts[1];
+      const fileData = await getFileFromChunks(uid, fileId);
+      if (fileData) {
+        if (fileData.mimeType === "application/gzip") {
+          await downloadCompressedBase64(`data:application/gzip;base64,${fileData.base64Data}`, fileName);
+        } else {
+          const link = document.createElement("a");
+          link.href = `data:${fileData.mimeType};base64,${fileData.base64Data}`;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
       }
     }
   }
