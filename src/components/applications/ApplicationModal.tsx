@@ -155,6 +155,9 @@ export default function ApplicationModal({
         cvFile || undefined
       );
       onClose();
+    } catch (err) {
+      // Error is already shown by parent component's onSave via toast
+      console.error("Modal save error:", err);
     } finally {
       setIsSaving(false);
     }

@@ -9,6 +9,23 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage
 
 const MAX_CV_SIZE = 5 * 1024 * 1024; // 5MB max for CV files
 const MAX_IMAGE_SIZE = 3 * 1024 * 1024; // 3MB max for images
+const UPLOAD_TIMEOUT_MS = 15000; // 15 seconds timeout
+
+/**
+ * Helper to wrap a promise with a timeout
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> {
+  let timeoutHandle: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(errorMessage)), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutHandle!);
+  }
+}
 
 /**
  * Generate standardized CV filename:
@@ -52,9 +69,18 @@ export async function uploadCvFile(
   const storagePath = `users/${uid}/cv/${applicationId}/${fileName}`;
   const storageRef = ref(storage, storagePath);
 
-  await uploadBytes(storageRef, file);
-  const url = await getDownloadURL(storageRef);
-  return url;
+  try {
+    await withTimeout(
+      uploadBytes(storageRef, file), 
+      UPLOAD_TIMEOUT_MS, 
+      "Upload timed out. Please ensure Firebase Storage is initialized in your console and rules are set."
+    );
+    const url = await getDownloadURL(storageRef);
+    return url;
+  } catch (error) {
+    console.error("Storage upload error:", error);
+    throw error;
+  }
 }
 
 /**
@@ -71,9 +97,18 @@ export async function uploadMotivationImage(
   const storagePath = `users/${uid}/motivation/board_${Date.now()}.${file.name.split(".").pop()?.toLowerCase() || "jpg"}`;
   const storageRef = ref(storage, storagePath);
 
-  await uploadBytes(storageRef, file);
-  const url = await getDownloadURL(storageRef);
-  return url;
+  try {
+    await withTimeout(
+      uploadBytes(storageRef, file), 
+      UPLOAD_TIMEOUT_MS, 
+      "Upload timed out. Please ensure Firebase Storage is initialized in your console and rules are set."
+    );
+    const url = await getDownloadURL(storageRef);
+    return url;
+  } catch (error) {
+    console.error("Storage upload error:", error);
+    throw error;
+  }
 }
 
 /**

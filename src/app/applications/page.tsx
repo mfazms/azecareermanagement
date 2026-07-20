@@ -88,12 +88,11 @@ function ApplicationsContent() {
           // Upload to Firebase Storage, get download URL
           cvFileUrl = await uploadCvFile(user.uid, appId, cvFile, cvFileName);
         } catch (err) {
-          toast.error(
-            err instanceof Error
+          const errorMessage = err instanceof Error
               ? err.message
-              : "Failed to upload CV file. Please try again."
-          );
-          return;
+              : "Failed to upload CV file. Please try again.";
+          toast.error(errorMessage);
+          throw new Error(errorMessage);
         }
       }
 
