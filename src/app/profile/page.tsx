@@ -109,7 +109,7 @@ export default function ProfilePage() {
     if (!user) return;
     try {
       const apps = await getApplications(user.uid);
-      const usage = calculateStorageUsage(apps, userProfile);
+      const usage = await calculateStorageUsage(apps, userProfile);
       setStorageUsage(usage);
     } catch (error) {
       console.error("Error calculating storage:", error);

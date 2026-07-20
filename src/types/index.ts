@@ -188,4 +188,4 @@ export const DEFAULT_SKILL_CATEGORIES = [
   "Hard Skills",
 ] as const;
 
-export const STORAGE_LIMIT_BYTES = 500 * 1024 * 1024; // 500 MB
+export const STORAGE_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB

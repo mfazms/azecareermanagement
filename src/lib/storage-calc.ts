@@ -22,6 +22,9 @@ function getObjectByteSize(obj: unknown): number {
   }
 }
 
+import { db } from "./firebase";
+import { collection, getDocs } from "firebase/firestore";
+
 /**
  * Calculate storage usage breakdown from loaded data.
  * Categorizes into: applications (text), CV files, evaluations, profile data.
@@ -29,17 +32,19 @@ function getObjectByteSize(obj: unknown): number {
  * This measures the *logical* size of data as stored in Firestore documents
  * (JSON-serialized), which closely approximates actual Firestore storage usage.
  */
-export function calculateStorageUsage(
+export async function calculateStorageUsage(
   applications: Application[],
   userProfile: UserProfile | null
-): StorageUsage {
+): Promise<StorageUsage> {
   let applicationsSize = 0;
   let cvFilesSize = 0;
   let evaluationsSize = 0;
+  let motivationImageSize = 0;
 
+  // Calculate sizes for applications and legacy non-chunked CVs
   for (const app of applications) {
-    // CV file size (base64 data)
-    if (app.cvFileUrl) {
+    // CV file size (legacy base64 data)
+    if (app.cvFileUrl && !app.cvFileUrl.startsWith("firestore://")) {
       cvFilesSize += getByteSize(app.cvFileUrl);
     }
 
@@ -58,11 +63,38 @@ export function calculateStorageUsage(
     applicationsSize += getObjectByteSize(textData);
   }
 
-  // Profile data size (including photoBase64, skills, etc.)
+  // Profile data size (including legacy photoBase64, skills, etc.)
   let profileDataSize = 0;
   if (userProfile) {
-    profileDataSize = getObjectByteSize(userProfile);
+    // We clone to remove firestore:// URL from calculation if present
+    const profileClone = { ...userProfile };
+    if (profileClone.motivationImageUrl?.startsWith("firestore://")) {
+       profileClone.motivationImageUrl = ""; // Don't double count
+    }
+    profileDataSize = getObjectByteSize(profileClone);
   }
+
+  // Fetch true size of all chunked files (CVs and Motivation images)
+  if (userProfile?.id && db) {
+    try {
+      const chunksRef = collection(db, "users", userProfile.id, "file_chunks");
+      const snapshot = await getDocs(chunksRef);
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const size = getByteSize(data.data || "");
+        if (data.fileId?.startsWith("cv_")) {
+          cvFilesSize += size;
+        } else if (data.fileId?.startsWith("motivation_")) {
+          motivationImageSize += size;
+        }
+      });
+    } catch (e) {
+      console.error("Error fetching chunk sizes:", e);
+    }
+  }
+
+  // Motivation images logically belong to profile storage
+  profileDataSize += motivationImageSize;
 
   const total = applicationsSize + cvFilesSize + evaluationsSize + profileDataSize;
 
