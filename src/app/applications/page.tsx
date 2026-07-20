@@ -14,7 +14,7 @@ import {
   updateEvaluation,
   deleteApplication,
 } from "@/lib/firestore";
-import { processFileForStorage, generateCvFileName } from "@/lib/storage";
+import { uploadCvFile, generateCvFileName } from "@/lib/storage";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
@@ -56,10 +56,11 @@ export default function ApplicationsPage() {
       let cvFileUrl = (data as Record<string, unknown>).cvFileUrl as string || "";
       let cvFileName = (data as Record<string, unknown>).cvFileName as string || "";
 
+      // Determine the application ID (existing or generate temp for new)
+      const appId = editingApp?.id || `temp_${Date.now()}`;
+
       if (cvFile) {
         try {
-          const { base64Data } = await processFileForStorage(cvFile);
-          cvFileUrl = base64Data;
           // Auto-rename: Company_Position_DateApplied_Resume.ext
           cvFileName = generateCvFileName(
             data.company,
@@ -67,11 +68,14 @@ export default function ApplicationsPage() {
             data.dateApplied,
             cvFile.name
           );
+
+          // Upload to Firebase Storage, get download URL
+          cvFileUrl = await uploadCvFile(user.uid, appId, cvFile, cvFileName);
         } catch (err) {
           toast.error(
             err instanceof Error
               ? err.message
-              : "Failed to process CV file. Please try a smaller file."
+              : "Failed to upload CV file. Please try again."
           );
           return;
         }

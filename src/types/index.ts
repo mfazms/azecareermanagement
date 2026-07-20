@@ -163,6 +163,7 @@ export interface UserProfile {
   mbti?: string;
   dreamPosition?: string;
   motivationImageBase64?: string;
+  motivationImageUrl?: string;
 }
 
 export interface StorageUsage {

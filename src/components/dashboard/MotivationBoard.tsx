@@ -3,10 +3,9 @@
 import { useState, useRef } from "react";
 import { ImagePlus, Loader2, X } from "lucide-react";
 import { updateUserProfile } from "@/lib/firestore";
+import { uploadMotivationImage } from "@/lib/storage";
 import type { UserProfile } from "@/types";
 import { toast } from "sonner";
-
-const MAX_MOTIVATION_SIZE = 800 * 1024; // 800KB max for the base64 image
 
 export default function MotivationBoard({
   uid,
@@ -20,40 +19,6 @@ export default function MotivationBoard({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const compressImage = (base64: string, maxWidth: number, quality: number): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        let { width, height } = img;
-
-        // Scale down if larger than maxWidth
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) { reject(new Error("Canvas context failed")); return; }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.onerror = reject;
-      img.src = base64;
-    });
-  };
-
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -66,37 +31,21 @@ export default function MotivationBoard({
 
     try {
       setIsUploading(true);
-      let base64 = await fileToBase64(file);
 
-      // Compress if too large
-      const base64Size = base64.length;
-      if (base64Size > MAX_MOTIVATION_SIZE) {
-        // Progressively compress with lower quality and smaller dimensions
-        const attempts = [
-          { maxWidth: 1920, quality: 0.7 },
-          { maxWidth: 1280, quality: 0.6 },
-          { maxWidth: 1024, quality: 0.5 },
-          { maxWidth: 800,  quality: 0.4 },
-          { maxWidth: 640,  quality: 0.3 },
-        ];
+      // Upload to Firebase Storage, get download URL
+      const url = await uploadMotivationImage(uid, file);
 
-        for (const { maxWidth, quality } of attempts) {
-          base64 = await compressImage(base64, maxWidth, quality);
-          if (base64.length <= MAX_MOTIVATION_SIZE) break;
-        }
-
-        if (base64.length > MAX_MOTIVATION_SIZE) {
-          toast.error("Image is too large even after compression. Please use a smaller image.");
-          return;
-        }
-      }
-
-      await updateUserProfile(uid, { motivationImageBase64: base64 });
+      // Save only the URL in Firestore (not the image data)
+      await updateUserProfile(uid, { motivationImageUrl: url });
       await refreshProfile();
       toast.success("Motivation board updated!");
     } catch (error) {
       console.error("Error uploading motivation image:", error);
-      toast.error("Failed to upload image. Please try again.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to upload image. Please try again."
+      );
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -107,9 +56,10 @@ export default function MotivationBoard({
 
   const handleRemove = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!userProfile?.motivationImageBase64) return;
+    const imageUrl = userProfile?.motivationImageUrl || userProfile?.motivationImageBase64;
+    if (!imageUrl) return;
     try {
-      await updateUserProfile(uid, { motivationImageBase64: "" });
+      await updateUserProfile(uid, { motivationImageUrl: "", motivationImageBase64: "" });
       await refreshProfile();
       toast.success("Motivation photo removed.");
     } catch (error) {
@@ -118,14 +68,16 @@ export default function MotivationBoard({
     }
   };
 
-  const hasImage = !!userProfile?.motivationImageBase64;
+  // Support both old base64 and new URL format
+  const imageSource = userProfile?.motivationImageUrl || userProfile?.motivationImageBase64 || "";
+  const hasImage = !!imageSource;
 
   return (
     <div className="relative group rounded-2xl border border-[#E8E8ED] shadow-sm bg-white overflow-hidden w-full h-48 sm:h-56 mt-4">
       {isUploading ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-20 gap-2">
           <Loader2 className="w-6 h-6 animate-spin text-[#0071E3]" />
-          <p className="text-xs text-[#86868B]">Uploading & compressing...</p>
+          <p className="text-xs text-[#86868B]">Uploading...</p>
         </div>
       ) : hasImage ? (
         <div 
@@ -133,9 +85,10 @@ export default function MotivationBoard({
           onClick={() => fileInputRef.current?.click()}
         >
            <img 
-             src={userProfile.motivationImageBase64} 
+             src={imageSource} 
              alt="Motivation Board" 
              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+             referrerPolicy="no-referrer"
            />
            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
            
